@@ -88,4 +88,74 @@ if st.sidebar.button("🚀 開始全自動掃描"):
                 m20 = df['Close'].rolling(20).mean().iloc[-1].item()
                 v_today = df['Volume'].iloc[-1].item()
                 v_avg = df['Volume'].rolling(5).mean().iloc[-1].item()
-                high
+                high_6mo = df['High'].max().item()
+                change = (p - p_prev) / p_prev * 100
+
+                if "釣魚" in 模式:
+                    dist_20 = (p - m20) / m20 * 100
+                    if 0 <= dist_20 <= dist_threshold:
+                        reward = high_6mo - p
+                        risk = p - (m20 * 0.98)
+                        ratio = round(reward / risk, 2) if risk > 0 else 0
+                        if ratio >= min_rr_ratio:
+                            all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "風報比": ratio, "診斷": "💎 回測支撐"})
+                else:
+                    if change >= change_threshold and v_today >= v_avg * vol_multiplier and p > m5:
+                        all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "漲幅%": f"{change:.2f}%", "診斷": "🔥 動能噴發"})
+                
+                time.sleep(0.02)
+            except:
+                continue
+            finally:
+                count += 1
+                progress_bar.progress(count / total)
+
+        st.session_state.final_df = pd.DataFrame(all_results) if all_results else None
+
+# --- 2. 顯示排行榜 ---
+if st.session_state.final_df is not None:
+    # 修正原本噴發錯誤的地方：加上閉合括號
+    st.subheader(f"🏆 {模式} 排行榜")
+    st.dataframe(st.session_state.final_df, use_container_width=True)
+elif st.session_state.final_df is None and 'final_df' in st.session_state:
+    st.info("掃描完成，但目前沒有符合篩選條件的標的。")
+
+# --- 3. 核心連動診斷區 ---
+st.divider()
+st.subheader("📈 單股深度診斷 (自動連動排行榜)")
+
+if st.session_state.final_df is not None and not st.session_state.final_df.empty:
+    stock_options = st.session_state.final_df.apply(lambda x: f"{x['代碼']} - {x['名稱']}", axis=1).tolist()
+    selected_option = st.selectbox("🎯 請從排行榜中選取要診斷的股票", stock_options)
+    diag_symbol = selected_option.split(" - ")[0]
+else:
+    diag_symbol = st.text_input("輸入要診斷的股票代號 (例如: 6669.TW)", "2330.TW")
+
+if diag_symbol:
+    with st.spinner(f"正在載入 {diag_symbol} 技術圖表..."):
+        try:
+            df_diag = yf.Ticker(diag_symbol).history(period="6mo")
+            if not df_diag.empty:
+                df_diag['MA5'] = df_diag['Close'].rolling(5).mean()
+                df_diag['MA20'] = df_diag['Close'].rolling(20).mean()
+                df_diag['MA60'] = df_diag['Close'].rolling(60).mean()
+                buy_signal = (df_diag['Close'] > df_diag['MA5']) & (df_diag['Close'].shift(1) < df_diag['MA5'].shift(1))
+                
+                fig = go.Figure(data=[go.Candlestick(
+                    x=df_diag.index, open=df_diag['Open'], high=df_diag['High'],
+                    low=df_diag['Low'], close=df_diag['Close'], name='K線')])
+                
+                fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA5'], line=dict(color='orange', width=1), name='MA5'))
+                fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA20'], line=dict(color='cyan', width=1), name='MA20'))
+                fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA60'], line=dict(color='red', width=1.5, dash='dot'), name='MA60'))
+                
+                fig.add_trace(go.Scatter(
+                    x=df_diag[buy_signal].index, y=df_diag[buy_signal]['Low'] * 0.97, 
+                    mode='markers', marker=dict(symbol='triangle-up', size=12, color='lime'), name='起漲訊號'))
+                
+                fig.update_layout(template='plotly_dark', height=600, 
+                                  margin=dict(l=10, r=10, t=10, b=10),
+                                  xaxis_rangeslider_visible=False)
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"圖表繪製發生錯誤: {e}")
