@@ -115,4 +115,4 @@ if diag_sid:
             fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['Close'].rolling(5).mean(), name='MA5', line=dict(color='orange', width=1)))
             fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['Close'].rolling(20).mean(), name='MA20', line=dict(color='cyan', width=1.5)))
             
-            fig.update_layout(template='plotly_dark',
+            fig.update_layout(template='plotly_dark'),
