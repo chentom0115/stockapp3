@@ -42,31 +42,29 @@ if st.sidebar.button("🚀 開始全自動掃描"):
     
     if "全部電子股" in target_group:
         dl = DataLoader()
-        # 抓取最近 3 天的資料確保有交易日數據
+        # 抓取最近 5 天的資料確保有交易日數據
         start_dt = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
-        df_price = dl.taiwan_stock_month_total(start_date=start_dt)
-        df_info = dl.taiwan_stock_info()
-        
-        if not df_price.empty:
-            # 1. 取得最後一個交易日的資料
-            last_date = df_price['date'].max()
-            df_latest = df_price[df_price['date'] == last_date].copy()
+        try:
+            df_price = dl.taiwan_stock_month_total(start_date=start_dt)
+            df_info = dl.taiwan_stock_info()
             
-            # 2. 合併產業資訊
-            merged = pd.merge(df_latest, df_info, on='stock_id')
-            
-            # 3. 過濾產業：加入關鍵的「電腦及週邊設備業」(緯穎所在分類)
-            keywords = '電子|半導體|光電|電腦及週邊|通信網路'
-            elec_df = merged[merged['industry_category'].str.contains(keywords, na=False)].copy()
-            
-            # 4. 依成交金額 (turnover) 排序，取前 150 名
-            elec_df = elec_df.sort_values(by='turnover', ascending=False).head(150)
-            
-            # 5. 建立標的字典
-            for _, row in elec_df.iterrows():
-                # 判斷上市或上櫃 (yfinance 結尾不同)
-                suffix = ".TW" if row['type'] == 'twse' else ".TWO"
-                target_dict[f"{row['stock_id']}{suffix}"] = row['stock_name']
+            if not df_price.empty:
+                last_date = df_price['date'].max()
+                df_latest = df_price[df_price['date'] == last_date].copy()
+                merged = pd.merge(df_latest, df_info, on='stock_id')
+                
+                # 過濾產業：加入關鍵的「電腦及週邊設備業」
+                keywords = '電子|半導體|光電|電腦及週邊|通信網路'
+                elec_df = merged[merged['industry_category'].str.contains(keywords, na=False)].copy()
+                
+                # 依成交金額排序取前 150 名
+                elec_df = elec_df.sort_values(by='turnover', ascending=False).head(150)
+                
+                for _, row in elec_df.iterrows():
+                    suffix = ".TW" if row['type'] == 'twse' else ".TWO"
+                    target_dict[f"{row['stock_id']}{suffix}"] = row['stock_name']
+        except Exception as e:
+            st.error(f"資料讀取錯誤: {e}")
     else:
         target_dict = groups[target_group]
 
@@ -84,36 +82,10 @@ if st.sidebar.button("🚀 開始全自動掃描"):
                 df = yf.Ticker(symbol).history(period="6mo")
                 if df.empty or len(df) < 22: continue
                 
-                p = df['Close'].iloc[-1]
-                p_prev = df['Close'].iloc[-2]
-                m5 = df['Close'].rolling(5).mean().iloc[-1]
-                m20 = df['Close'].rolling(20).mean().iloc[-1]
-                v_today = df['Volume'].iloc[-1]
-                v_avg = df['Volume'].rolling(5).mean().iloc[-1]
-                high_6mo = df['High'].max()
-                change = (p - p_prev) / p_prev * 100
-
-                if "釣魚" in 模式:
-                    dist_20 = (p - m20) / m20 * 100
-                    if 0 <= dist_20 <= dist_threshold:
-                        reward = high_6mo - p
-                        risk = p - (m20 * 0.98)
-                        ratio = round(reward / risk, 2) if risk > 0 else 0
-                        if ratio >= min_rr_ratio:
-                            all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "風報比": ratio, "診斷": "💎 回測支撐"})
-                else:
-                    if change >= change_threshold and v_today >= v_avg * vol_multiplier and p > m5:
-                        all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "漲幅%": f"{change:.2f}%", "診斷": "🔥 動能噴發"})
-                
-                time.sleep(0.02) # 稍微加速掃描
-            except:
-                continue
-            finally:
-                count += 1
-                progress_bar.progress(count / total)
-
-        st.session_state.final_df = pd.DataFrame(all_results) if all_results else None
-
-# --- 2. 顯示排行榜 ---
-if st.session_state.final_df is not None:
-    st.subheader(f"🏆 {
+                p = df['Close'].iloc[-1].item()
+                p_prev = df['Close'].iloc[-2].item()
+                m5 = df['Close'].rolling(5).mean().iloc[-1].item()
+                m20 = df['Close'].rolling(20).mean().iloc[-1].item()
+                v_today = df['Volume'].iloc[-1].item()
+                v_avg = df['Volume'].rolling(5).mean().iloc[-1].item()
+                high
