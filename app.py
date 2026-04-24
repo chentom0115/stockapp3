@@ -7,7 +7,7 @@ from FinMind.data import DataLoader
 import plotly.graph_objects as go
 
 # ----------------- 核心設定 -----------------
-FINMIND_TOKEN = "您的_TOKEN"
+FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoibGlvOTE5IiwiZW1haWwiOiJsaW85MTlAZ21haWwuY29tIn0.BUuQUOm9I528zgPhVvQOfOYDqS2fd5YudA6PKa1vHgA"
 
 def initialize_app():
     st.set_page_config(page_title="韭菜選股 V1 - 完全體", layout="wide")
