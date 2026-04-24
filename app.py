@@ -109,11 +109,92 @@ if diag_sid:
     with st.spinner("載入圖表中..."):
         df_diag = yf.Ticker(diag_sid).history(period="6mo")
         if not df_diag.empty:
-            # 建立多指標圖表
-            fig = go.Figure(data=[go.Candlestick(x=df_diag.index, open=df_diag['Open'], high=df_diag['High'], low=df_diag['Low'], close=df_diag['Close'], name='K線')])
-            # 加入 MA 指標
-            fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['Close'].rolling(5).mean(), name='MA5', line=dict(color='orange', width=1)))
-            fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['Close'].rolling(20).mean(), name='MA20', line=dict(color='cyan', width=1.5)))
-            
-            fig.update_layout(template='plotly_dark', height=500, margin=dict(l=10, r=10, t=30, b=10), xaxis_rangeslider_visible=False)
-            st.plotly_chart(fig, use_container_width=True)
+            # === 計算均線 ===
+df_diag['MA5'] = df_diag['Close'].rolling(5).mean()
+df_diag['MA20'] = df_diag['Close'].rolling(20).mean()
+df_diag['MA60'] = df_diag['Close'].rolling(60).mean()
+
+# === 起漲訊號（條件你可再優化）===
+# 條件：站上MA5 + MA5 > MA20 + 量能放大
+df_diag['vol_avg'] = df_diag['Volume'].rolling(5).mean()
+df_diag['signal'] = (
+    (df_diag['Close'] > df_diag['MA5']) &
+    (df_diag['MA5'] > df_diag['MA20']) &
+    (df_diag['Volume'] > df_diag['vol_avg'] * 1.2)
+)
+
+signal_df = df_diag[df_diag['signal']]
+
+# === 建立圖表（上下兩層）===
+from plotly.subplots import make_subplots
+
+fig = make_subplots(
+    rows=2, cols=1,
+    shared_xaxes=True,
+    vertical_spacing=0.03,
+    row_heights=[0.7, 0.3]
+)
+
+# === K線 ===
+fig.add_trace(go.Candlestick(
+    x=df_diag.index,
+    open=df_diag['Open'],
+    high=df_diag['High'],
+    low=df_diag['Low'],
+    close=df_diag['Close'],
+    name='K線'
+), row=1, col=1)
+
+# === 均線 ===
+fig.add_trace(go.Scatter(
+    x=df_diag.index, y=df_diag['MA5'],
+    name='MA5',
+    line=dict(color='yellow', width=2)
+), row=1, col=1)
+
+fig.add_trace(go.Scatter(
+    x=df_diag.index, y=df_diag['MA20'],
+    name='MA20',
+    line=dict(color='blue', width=2)
+), row=1, col=1)
+
+fig.add_trace(go.Scatter(
+    x=df_diag.index, y=df_diag['MA60'],
+    name='MA60 (季線)',
+    line=dict(color='red', width=2, dash='dot')
+), row=1, col=1)
+
+# === 起漲三角形 ===
+fig.add_trace(go.Scatter(
+    x=signal_df.index,
+    y=signal_df['Low'] * 0.98,
+    mode='markers',
+    name='起漲訊號',
+    marker=dict(
+        symbol='triangle-up',
+        color='lime',
+        size=10
+    )
+), row=1, col=1)
+
+# === 成交量 ===
+fig.add_trace(go.Bar(
+    x=df_diag.index,
+    y=df_diag['Volume'],
+    name='Volume'
+), row=2, col=1)
+
+# === Layout ===
+fig.update_layout(
+    template='plotly_dark',
+    height=600,
+    margin=dict(l=10, r=10, t=30, b=10),
+    xaxis_rangeslider_visible=False,
+    legend=dict(
+        orientation="v",
+        x=1,
+        y=1
+    )
+)
+
+st.plotly_chart(fig, use_container_width=True)
