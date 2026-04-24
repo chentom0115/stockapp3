@@ -6,7 +6,7 @@ import time
 
 # 網頁基本設定
 st.set_page_config(page_title="韭菜選股 V1", layout="wide")
-st.title("🧬 韭菜選股 V1：全自動電子產業掃描儀")
+st.title("🧬 韭菜選股 V1：專業交易員版 (含風報比)")
 
 # --- 側邊欄控制區 ---
 st.sidebar.header("🔍 釣魚設定")
@@ -24,7 +24,7 @@ groups = {
     "載板三雄": {"3037.TW": "欣興", "8046.TW": "南電", "3189.TW": "景碩", "2368.TW": "金像電"}
 }
 
-# 初始化 Session State 用於存放結果
+# 初始化 Session State
 if 'result_df' not in st.session_state:
     st.session_state.result_df = None
 
@@ -32,9 +32,8 @@ if 'result_df' not in st.session_state:
 if st.sidebar.button("🚀 啟動全自動掃描"):
     all_results = []
     
-    # 如果選「全部電子股」，利用 FinMind 抓取
     if target_group == "全部電子股 (Top 150)":
-        st.info("正在從 FinMind 撈取全台股電子清單...")
+        st.info("正在從 FinMind 撈取清單...")
         dl = DataLoader()
         df_info = dl.taiwan_stock_info()
         elec_df = df_info[df_info['industry_category'].str.contains('電子|半導體|光電', na=False)]
@@ -42,73 +41,65 @@ if st.sidebar.button("🚀 啟動全自動掃描"):
     else:
         target_dict = groups[target_group]
     
-    st.info(f"正在分析【{target_group}】中，請稍候...")
+    st.info(f"正在分析【{target_group}】並計算風報比...")
     progress_bar = st.progress(0)
     
     for i, (symbol, name) in enumerate(target_dict.items()):
         try:
-            # 嘗試 .TW 或 .TWO
             tk = yf.Ticker(symbol)
-            df = tk.history(period="3mo")
+            df = tk.history(period="6mo") # 抓6個月數據算高點
             if df.empty:
                 symbol = symbol.replace(".TW", ".TWO")
-                tk = yf.Ticker(symbol)
-                df = tk.history(period="3mo")
+                df = yf.Ticker(symbol).history(period="6mo")
             
-            if df.empty or len(df) < 20: continue
+            if df.empty or len(df) < 22: continue
             
             p = df['Close'].iloc[-1]
             m5 = df['Close'].rolling(5).mean().iloc[-1]
             m20 = df['Close'].rolling(20).mean().iloc[-1]
             v_today = df['Volume'].iloc[-1]
             v_avg = df['Volume'].rolling(5).mean().iloc[-1]
+            high_6mo = df['High'].max()
             change = (p - df['Close'].iloc[-2]) / df['Close'].iloc[-2] * 100
 
+            # 1. 核心評分
             score = 0
             tags = []
             if mode == "搶短爆發型":
-                if p > m5: score += 30; tags.append("強勢慣性")
-                if change > 2.5: score += 30; tags.append("動能噴發")
-                if v_today > v_avg * 1.5: score += 40; tags.append("🔥主力對敲")
+                if p > m5: score += 30; tags.append("強勢")
+                if change > 2.5: score += 30; tags.append("噴發")
+                if v_today > v_avg * 1.5: score += 40; tags.append("🔥爆量")
             else:
-                if p > m5 and m5 > m20: score += 40; tags.append("趨勢轉正")
-                if v_today > v_avg: score += 30; tags.append("量能升溫")
-                dist_high = (df['High'].max() - p) / df['High'].max()
-                if 0.1 < dist_high < 0.35: score += 30; tags.append("🐟低檔區")
+                if p > m5 and m5 > m20: score += 40; tags.append("多頭")
+                if v_today > v_avg: score += 30; tags.append("量增")
+                dist_h = (high_6mo - p) / high_6mo
+                if 0.1 < dist_h < 0.35: score += 30; tags.append("🐟釣魚區")
+
+            # 2. 風報比試算 (Reward: 漲回高點空間 / Risk: 跌破月線2%風險)
+            reward_space = high_6mo - p
+            risk_space = p - (m20 * 0.98)
+            rr_ratio = round(reward_space / risk_space, 2) if risk_space > 0 else 0
 
             if score >= threshold:
-                all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "漲跌%": f"{change:.2f}%", "得分": score, "診斷": " | ".join(tags)})
+                all_results.append({
+                    "名稱": name, "代碼": symbol, "價格": round(p, 2),
+                    "預期獲利%": f"{((reward_space/p)*100):.1f}%",
+                    "風報比": rr_ratio, "得分": score, "診斷": " | ".join(tags)
+                })
             time.sleep(0.05)
         except: continue
         progress_bar.progress((i + 1) / len(target_dict))
 
-    if all_results:
-        st.session_state.result_df = pd.DataFrame(all_results).sort_values(by="得分", ascending=False)
-    else:
-        st.session_state.result_df = None
-        st.warning("無符合門檻標的")
+    st.session_state.result_df = pd.DataFrame(all_results).sort_values(by="風報比", ascending=False) if all_results else None
 
-# --- 顯示結果與 AI 報告按鈕 ---
+# --- 顯示結果 ---
 if st.session_state.result_df is not None:
-    st.subheader(f"🏆 {target_group} 排行榜")
-    st.table(st.session_state.result_df)
+    st.subheader(f"🏆 {target_group} 排行榜 (依風報比排序)")
+    st.dataframe(st.session_state.result_df, use_container_width=True)
+    st.write("💡 **風報比 > 2.0**：代表潛在獲利是風險的兩倍以上，值得進場！")
     
-    # AI 報告生成器
-    st.divider()
-    st.subheader("🤖 AI 盤後分析助手")
-    if st.button("生成 Claude 3 分析指令"):
+    # AI 報告生成
+    if st.button("🤖 生成 AI 盤後分析指令"):
         top_3 = st.session_state.result_df.head(3).to_string(index=False)
-        ai_prompt = f"""
-請扮演專業的台股分析師，針對以下「韭菜選股 V1」掃描出的強勢股數據進行盤後解析：
-
-數據如下：
-{top_3}
-
-請完成：
-1. 針對這三檔標的，簡述目前資金追逐的題材（例如 CPO 或 AI 伺服器）。
-2. 為這三檔標的設定明天的「關鍵支撐位」與「目標滿足位」。
-3. 根據目前得分，給予「買進、觀望、或減碼」的具體建議。
-語氣請保持專業、堅定，並符合台灣投資市場用語。
-"""
+        ai_prompt = f"請分析以下數據並給予建議：\n{top_3}\n請特別針對風報比與得分提供明天釣魚的具體點位。"
         st.code(ai_prompt, language="text")
-        st.info("☝️ 請複製上方文字，貼給 Claude 3 或 ChatGPT 即可獲得專業分析！")
