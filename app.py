@@ -5,38 +5,39 @@ from FinMind.data import DataLoader
 import time
 
 st.set_page_config(page_title="韭菜選股 V1", layout="wide")
-st.title("🧬 韭菜選股 V1")
+st.title("🧬 韭菜選股 V1 (含 AI 盤後分析助手)")
 
 # --- 側邊欄控制區 ---
 st.sidebar.header("🔍 選股核心設定")
-
-# 1. 模式選擇
 模式 = st.sidebar.radio("選擇操作模式", ["釣魚穩健型 (看回測)", "搶短爆發型 (看噴發)"])
 
-# 2. 根據模式顯示對應的參數
 if 模式 == "釣魚穩健型 (看回測)":
     st.sidebar.markdown("---")
-    dist_threshold = st.sidebar.slider("距離支撐門檻 (%)", 0.5, 8.0, 4.5, help="離均線多近才要釣")
-    min_rr_ratio = st.sidebar.slider("最低風報比要求", 1.0, 5.0, 2.0, help="潛在獲利是風險的幾倍")
+    dist_threshold = st.sidebar.slider("距離支撐門檻 (%)", 0.5, 8.0, 4.5)
+    min_rr_ratio = st.sidebar.slider("最低風報比要求", 1.0, 5.0, 2.0)
 else:
     st.sidebar.markdown("---")
-    change_threshold = st.sidebar.slider("今日最低漲幅 (%)", 1.0, 7.0, 2.5, help="夠強才搶短")
-    vol_multiplier = st.sidebar.slider("量能爆發倍數", 1.0, 3.0, 1.5, help="比平常多幾倍量")
+    change_threshold = st.sidebar.slider("今日最低漲幅 (%)", 1.0, 7.0, 2.5)
+    vol_multiplier = st.sidebar.slider("量能爆發倍數", 1.0, 3.0, 1.5)
 
 target_group = st.sidebar.selectbox("3. 選擇魚池", 
-    ["電子股 (Top 200)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
+    ["全部電子股 (Top 200)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
 
-# 資料庫 (維持不變)
-groups = {
-    "AI 伺服器/代工": {"2330.TW": "台積電", "2317.TW": "鴻海", "2382.TW": "廣達", "3231.TW": "緯創", "6669.TW": "緯穎", "3017.TW": "奇鋐"},
-    "CPO 矽光子": {"3665.TW": "貿聯-KY", "6442.TW": "光聖", "3081.TW": "聯亞", "3363.TWO": "上詮", "3163.TWO": "波若威", "4979.TWO": "華星光"},
-    "低軌衛星概念": {"2313.TW": "華通", "2314.TW": "台揚", "3491.TWO": "昇達科", "6274.TWO": "台燿", "2383.TW": "台光電"},
-    "載板三雄": {"3037.TW": "欣興", "8046.TW": "南電", "3189.TW": "景碩", "2368.TW": "金像電"}
-}
+# 初始化 Session State 存放結果
+if 'final_df' not in st.session_state:
+    st.session_state.final_df = None
 
+# --- 執行按鈕 ---
 if st.sidebar.button("🚀 開始全自動掃描"):
+    groups = {
+        "AI 伺服器/代工": {"2330.TW": "台積電", "2317.TW": "鴻海", "2382.TW": "廣達", "3231.TW": "緯創", "6669.TW": "緯穎", "3017.TW": "奇鋐"},
+        "CPO 矽光子": {"3665.TW": "貿聯-KY", "6442.TW": "光聖", "3081.TW": "聯亞", "3363.TWO": "上詮", "3163.TWO": "波若威", "4979.TWO": "華星光"},
+        "低軌衛星概念": {"2313.TW": "華通", "2314.TW": "台揚", "3491.TWO": "昇達科", "6274.TWO": "台燿", "2383.TW": "台光電"},
+        "載板三雄": {"3037.TW": "欣興", "8046.TW": "南電", "3189.TW": "景碩", "2368.TW": "金像電"}
+    }
+    
     all_results = []
-    if target_group == "電子股 (Top 200)":
+    if target_group == "全部電子股 (Top 200)":
         dl = DataLoader()
         df_info = dl.taiwan_stock_info()
         elec_df = df_info[df_info['industry_category'].str.contains('電子|半導體|光電', na=False)]
@@ -53,7 +54,6 @@ if st.sidebar.button("🚀 開始全自動掃描"):
             
             p = df['Close'].iloc[-1].item()
             m5 = df['Close'].rolling(5).mean().iloc[-1].item()
-            m10 = df['Close'].rolling(10).mean().iloc[-1].item()
             m20 = df['Close'].rolling(20).mean().iloc[-1].item()
             v_today = df['Volume'].iloc[-1].item()
             v_avg = df['Volume'].rolling(5).mean().iloc[-1].item()
@@ -67,18 +67,36 @@ if st.sidebar.button("🚀 開始全自動掃描"):
                     risk = p - (m20 * 0.98)
                     ratio = round(reward / risk, 2) if risk > 0 else 0
                     if ratio >= min_rr_ratio:
-                        all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "風報比": ratio, "診斷": "回測支撐中"})
-            else: # 搶短爆發
+                        all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "風報比": ratio, "診斷": "回測支撐"})
+            else:
                 if change >= change_threshold and v_today >= v_avg * vol_multiplier and p > m5:
-                    all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "今日漲幅%": f"{change:.2f}%", "診斷": "🔥動能噴發"})
+                    all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "漲幅%": f"{change:.2f}%", "診斷": "🔥動能噴發"})
             time.sleep(0.05)
         except: continue
         progress_bar.progress((i + 1) / len(target_dict))
 
-    if all_results:
-        st.subheader(f"🏆 {模式} 排行榜")
-        st.dataframe(pd.DataFrame(all_results))
-    else:
-        st.warning("❌ 目前無符合條件之標的。")
+    st.session_state.final_df = pd.DataFrame(all_results) if all_results else None
 
+# --- 顯示結果與 AI 助手 ---
+if st.session_state.final_df is not None:
+    st.subheader(f"🏆 {模式} 排行榜")
+    st.dataframe(st.session_state.final_df, use_container_width=True)
+    
+    st.divider()
+    st.subheader("🤖 AI 盤後分析助手")
+    if st.button("生成 Claude 3 分析指令"):
+        top_data = st.session_state.final_df.head(3).to_string(index=False)
+        ai_prompt = f"""
+請扮演專業台股分析師，針對「韭菜選股 V1」掃描出的【{模式}】數據進行解析：
+數據如下：
+{top_data}
 
+請根據模式特性提供：
+1. {"針對回測支撐標的，分析其是否具備『止跌起漲』的特徵？" if "釣魚" in 模式 else "針對強勢噴發標的，分析其『隔天續航力』與追高風險？"}
+2. 設定明天的「壓力位」與「支撐位」。
+3. 具體的進場、停損與停利建議。
+"""
+        st.code(ai_prompt, language="text")
+        st.info("☝️ 複製上方指令貼給 Claude 3 或 ChatGPT 即可！")
+elif st.session_state.final_df is None:
+    st.write("目前無符合條件之標的，請嘗試調整左側參數。")
