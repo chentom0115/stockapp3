@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timedelta
 
 # 設定 Token (建議將這行換成你截圖中的那串長代碼)
-FINMIND_TOKEN = "你的_TOKEN_貼在這邊"
+FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoibGlvOTE5IiwiZW1haWwiOiJsaW85MTlAZ21haWwuY29tIn0.BUuQUOm9I528zgPhVvQOfOYDqS2fd5YudA6PKa1vHgA"
 
 st.set_page_config(page_title="韭菜選股 V1 - 專業版", layout="wide")
 st.title("🚀 韭菜選股 V1")
