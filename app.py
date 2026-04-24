@@ -22,7 +22,7 @@ else:
     vol_multiplier = st.sidebar.slider("量能爆發倍數", 1.0, 3.0, 1.5)
 
 target_group = st.sidebar.selectbox("3. 選擇魚池", 
-    ["全部電子股 (Top 100)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
+    ["全部電子股 (Top 200)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
 
 # 初始化 Session State
 if 'final_df' not in st.session_state:
@@ -37,13 +37,36 @@ if st.sidebar.button("🚀 開始全自動掃描"):
         "載板三雄": {"3037.TW": "欣興", "8046.TW": "南電", "3189.TW": "景碩", "2368.TW": "金像電"}
     }
     all_results = []
-    if target_group == "全部電子股 (Top 100)":
+    if target_group == "全部電子股 (Top 200)":
         dl = DataLoader()
+        
+        # 1. 取得當日（或最近一個交易日）的全市場成交值排名
+        # 這會回傳當天成交金額前 200 名的股票
+        df_rank = dl.taiwan_stock_daily_turnover_rank(
+            data_id="", 
+            start_date=pd.Timestamp.now().strftime('%Y-%m-%d')
+        )
+        
+        # 如果當天還沒開盤或沒資料，抓前一天的
+        if df_rank.empty:
+            last_date = (pd.Timestamp.now() - pd.Timedelta(days=3)).strftime('%Y-%m-%d')
+            df_rank = dl.taiwan_stock_daily_turnover_rank(data_id="", start_date=last_date)
+
+        # 2. 取得股票基本資訊（為了過濾產業類別）
         df_info = dl.taiwan_stock_info()
-        elec_df = df_info[df_info['industry_category'].str.contains('電子|半導體|光電', na=False)]
-        target_dict = {f"{row['stock_id']}.TW": row['stock_name'] for _, row in elec_df.head(300).iterrows()}
-    else:
-        target_dict = groups[target_group]
+        
+        # 3. 合併資料：讓排名資料帶有「產業類別」
+        # 把成交值前 200 名與股票資訊結合
+        merged_df = pd.merge(df_rank, df_info, on='stock_id')
+        
+        # 4. 過濾出電子相關產業 (包含電腦周邊，這樣緯穎才進得來)
+        keywords = '電子|半導體|光電|電腦及週邊|通信網路'
+        elec_top_200 = merged_df[merged_df['industry_category'].str.contains(keywords, na=False)]
+        
+        # 5. 轉換為掃描用的字典格式
+        target_dict = {f"{row['stock_id']}.TW": row['stock_name'] for _, row in elec_top_200.iterrows()}
+        
+        st.sidebar.info(f"已鎖定成交值前 200 名中的 {len(target_dict)} 檔電子股進行掃描")
     
     progress_bar = st.progress(0)
     for i, (symbol, name) in enumerate(target_dict.items()):
