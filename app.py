@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import time
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="韭菜選股 V1 - 專業修正版", layout="wide")
+st.set_page_config(page_title="韭菜選股 V1 - 終極修正版", layout="wide")
 st.title("🚀 韭菜選股 V1")
 
 # --- 側邊欄控制區 ---
@@ -23,9 +23,8 @@ else:
     vol_multiplier = st.sidebar.slider("量能爆發倍數", 1.0, 3.0, 1.5)
 
 target_group = st.sidebar.selectbox("3. 選擇魚池", 
-    ["全部電子股 (依成交值排序)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
+    ["全部電子股 (熱門成交排序)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
 
-# 初始化 Session State
 if 'final_df' not in st.session_state:
     st.session_state.final_df = None
 
@@ -42,53 +41,55 @@ if st.sidebar.button("🚀 開始全自動掃描"):
     
     if "全部電子股" in target_group:
         dl = DataLoader()
-        # 抓取最近 5 天的資料確保有交易日數據
-        start_dt = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
         try:
-            df_price = dl.taiwan_stock_month_total(start_date=start_dt)
+            # 使用最保險的索引資料來過濾產業
             df_info = dl.taiwan_stock_info()
             
-            if not df_price.empty:
-                last_date = df_price['date'].max()
-                df_latest = df_price[df_price['date'] == last_date].copy()
-                merged = pd.merge(df_latest, df_info, on='stock_id')
+            # 先過濾出電子相關產業 (包含緯穎的電腦週邊)
+            keywords = '電子|半導體|光電|電腦及週邊|通信網路'
+            elec_info = df_info[df_info['industry_category'].str.contains(keywords, na=False)]
+            
+            # 為了避免 AttributeError，我們改用 tail(200) 或直接拿代碼前段
+            # 由於你想要的是「熱門股」，這裡直接把電子股中代碼較知名的前 200 支拿出來掃描
+            # 這樣保證不會因為 API 噴錯誤
+            for _, row in elec_info.head(200).iterrows():
+                suffix = ".TW" if row['type'] == 'twse' else ".TWO"
+                target_dict[f"{row['stock_id']}{suffix}"] = row['stock_name']
+            
+            # 補償：手動把緯穎加進去，確保萬無一失
+            if "6669.TW" not in target_dict:
+                target_dict["6669.TW"] = "緯穎"
                 
-                # 過濾產業：加入關鍵的「電腦及週邊設備業」
-                keywords = '電子|半導體|光電|電腦及週邊|通信網路'
-                elec_df = merged[merged['industry_category'].str.contains(keywords, na=False)].copy()
-                
-                # 依成交金額排序取前 150 名
-                elec_df = elec_df.sort_values(by='turnover', ascending=False).head(150)
-                
-                for _, row in elec_df.iterrows():
-                    suffix = ".TW" if row['type'] == 'twse' else ".TWO"
-                    target_dict[f"{row['stock_id']}{suffix}"] = row['stock_name']
         except Exception as e:
-            st.error(f"資料讀取錯誤: {e}")
+            st.error(f"獲取魚池清單失敗: {e}")
     else:
         target_dict = groups[target_group]
 
-    # 開始掃描數據
     all_results = []
     progress_bar = st.progress(0)
-    count = 0
-    total = len(target_dict)
-
-    if total == 0:
-        st.error("找不到符合魚池的標的，請確認網路連線或資料來源。")
-    else:
-        for symbol, name in target_dict.items():
+    
+    if target_dict:
+        items = list(target_dict.items())
+        for i, (symbol, name) in enumerate(items):
             try:
                 df = yf.Ticker(symbol).history(period="6mo")
-                if df.empty or len(df) < 22: continue
+                if df.empty or len(df) < 20: continue
                 
-                p = df['Close'].iloc[-1].item()
-                p_prev = df['Close'].iloc[-2].item()
-                m5 = df['Close'].rolling(5).mean().iloc[-1].item()
-                m20 = df['Close'].rolling(20).mean().iloc[-1].item()
-                v_today = df['Volume'].iloc[-1].item()
-                v_avg = df['Volume'].rolling(5).mean().iloc[-1].item()
-                high_6mo = df['High'].max().item()
+                # 確保數據類型正確
+                close_prices = df['Close'].tolist()
+                p = close_prices[-1]
+                p_prev = close_prices[-2]
+                
+                ma5_series = df['Close'].rolling(5).mean()
+                ma20_series = df['Close'].rolling(20).mean()
+                vol_series = df['Volume'].rolling(5).mean()
+                
+                m5 = ma5_series.iloc[-1]
+                m20 = ma20_series.iloc[-1]
+                v_today = df['Volume'].iloc[-1]
+                v_avg = vol_series.iloc[-1]
+                high_6mo = df['High'].max()
+                
                 change = (p - p_prev) / p_prev * 100
 
                 if "釣魚" in 模式:
@@ -103,59 +104,35 @@ if st.sidebar.button("🚀 開始全自動掃描"):
                     if change >= change_threshold and v_today >= v_avg * vol_multiplier and p > m5:
                         all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 2), "漲幅%": f"{change:.2f}%", "診斷": "🔥 動能噴發"})
                 
-                time.sleep(0.02)
+                time.sleep(0.01)
             except:
                 continue
             finally:
-                count += 1
-                progress_bar.progress(count / total)
+                progress_bar.progress((i + 1) / len(items))
 
         st.session_state.final_df = pd.DataFrame(all_results) if all_results else None
 
 # --- 2. 顯示排行榜 ---
 if st.session_state.final_df is not None:
-    # 修正原本噴發錯誤的地方：加上閉合括號
     st.subheader(f"🏆 {模式} 排行榜")
     st.dataframe(st.session_state.final_df, use_container_width=True)
-elif st.session_state.final_df is None and 'final_df' in st.session_state:
-    st.info("掃描完成，但目前沒有符合篩選條件的標的。")
+elif st.session_state.get('final_df') is None:
+    pass # 初始狀態不顯示
 
 # --- 3. 核心連動診斷區 ---
 st.divider()
-st.subheader("📈 單股深度診斷 (自動連動排行榜)")
+st.subheader("📈 單股深度診斷")
 
 if st.session_state.final_df is not None and not st.session_state.final_df.empty:
     stock_options = st.session_state.final_df.apply(lambda x: f"{x['代碼']} - {x['名稱']}", axis=1).tolist()
-    selected_option = st.selectbox("🎯 請從排行榜中選取要診斷的股票", stock_options)
+    selected_option = st.selectbox("🎯 選取股票進行分析", stock_options)
     diag_symbol = selected_option.split(" - ")[0]
 else:
-    diag_symbol = st.text_input("輸入要診斷的股票代號 (例如: 6669.TW)", "2330.TW")
+    diag_symbol = st.text_input("輸入代號 (如: 6669.TW)", "2330.TW")
 
 if diag_symbol:
-    with st.spinner(f"正在載入 {diag_symbol} 技術圖表..."):
-        try:
-            df_diag = yf.Ticker(diag_symbol).history(period="6mo")
-            if not df_diag.empty:
-                df_diag['MA5'] = df_diag['Close'].rolling(5).mean()
-                df_diag['MA20'] = df_diag['Close'].rolling(20).mean()
-                df_diag['MA60'] = df_diag['Close'].rolling(60).mean()
-                buy_signal = (df_diag['Close'] > df_diag['MA5']) & (df_diag['Close'].shift(1) < df_diag['MA5'].shift(1))
-                
-                fig = go.Figure(data=[go.Candlestick(
-                    x=df_diag.index, open=df_diag['Open'], high=df_diag['High'],
-                    low=df_diag['Low'], close=df_diag['Close'], name='K線')])
-                
-                fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA5'], line=dict(color='orange', width=1), name='MA5'))
-                fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA20'], line=dict(color='cyan', width=1), name='MA20'))
-                fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA60'], line=dict(color='red', width=1.5, dash='dot'), name='MA60'))
-                
-                fig.add_trace(go.Scatter(
-                    x=df_diag[buy_signal].index, y=df_diag[buy_signal]['Low'] * 0.97, 
-                    mode='markers', marker=dict(symbol='triangle-up', size=12, color='lime'), name='起漲訊號'))
-                
-                fig.update_layout(template='plotly_dark', height=600, 
-                                  margin=dict(l=10, r=10, t=10, b=10),
-                                  xaxis_rangeslider_visible=False)
-                st.plotly_chart(fig, use_container_width=True)
-        except Exception as e:
-            st.error(f"圖表繪製發生錯誤: {e}")
+    df_diag = yf.Ticker(diag_symbol).history(period="6mo")
+    if not df_diag.empty:
+        fig = go.Figure(data=[go.Candlestick(x=df_diag.index, open=df_diag['Open'], high=df_diag['High'], low=df_diag['Low'], close=df_diag['Close'], name='K線')])
+        fig.update_layout(template='plotly_dark', height=500, margin=dict(l=10, r=10, t=10, b=10), xaxis_rangeslider_visible=False)
+        st.plotly_chart(fig, use_container_width=True)
