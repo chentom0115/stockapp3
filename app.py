@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import time
 
 st.set_page_config(page_title="韭菜選股 V1", layout="wide")
-st.title("🧬 韭菜選股 V1)
+st.title("🧬 韭菜選股 V1")
 
 # --- 側邊欄控制區 ---
 st.sidebar.header("🔍 選股核心設定")
