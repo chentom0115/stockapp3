@@ -80,3 +80,28 @@ if st.sidebar.button("🚀 開始全自動掃描"):
         st.dataframe(pd.DataFrame(all_results))
     else:
         st.warning("❌ 目前無符合條件之標的。")
+
+# --- 顯示結果與 AI 報告按鈕 ---
+if st.session_state.result_df is not None:
+    st.subheader(f"🏆 {target_group} 排行榜")
+    st.table(st.session_state.result_df)
+    
+    # AI 報告生成器
+    st.divider()
+    st.subheader("🤖 AI 盤後分析助手")
+    if st.button("生成 Claude 3 分析指令"):
+        top_3 = st.session_state.result_df.head(3).to_string(index=False)
+        ai_prompt = f"""
+請扮演專業的台股分析師，針對以下「韭菜選股 V1」掃描出的強勢股數據進行盤後解析：
+
+數據如下：
+{top_3}
+
+請完成：
+1. 針對這三檔標的，簡述目前資金追逐的題材（例如 CPO 或 AI 伺服器）。
+2. 為這三檔標的設定明天的「關鍵支撐位」與「目標滿足位」。
+3. 根據目前得分，給予「買進、觀望、或減碼」的具體建議。
+語氣請保持專業、堅定，並符合台灣投資市場用語。
+"""
+        st.code(ai_prompt, language="text")
+        st.info("☝️ 請複製上方文字，貼給 Claude 3 或 ChatGPT 即可獲得專業分析！")
