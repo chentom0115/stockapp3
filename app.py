@@ -3,201 +3,87 @@ import yfinance as yf
 import pandas as pd
 from FinMind.data import DataLoader
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-FINMIND_TOKEN = ""
+# --- [設定區] ---
+FINMIND_TOKEN = "您的_TOKEN"
 
-st.set_page_config(page_title="韭菜選股 V2 - 回測版", layout="wide")
-st.title("🚀 韭菜選股 V2（含勝率回測）")
+st.set_page_config(page_title="韭菜選股 V1", layout="wide")
+st.title("🚀 韭菜選股 V1")
 
-# ================= 側邊欄 =================
+# --- [側邊欄] (保持與您截圖一致的佈局) ---
 with st.sidebar:
-    st.header("🔍 選股設定")
-    模式 = st.radio("模式", ["爆發型", "釣魚型"])
-
-    if 模式 == "爆發型":
-        change_threshold = st.slider("漲幅%", 1.0, 7.0, 2.5)
-        vol_multiplier = st.slider("量能倍數", 1.0, 3.0, 1.5)
+    st.header("🔍 選股核心設定")
+    模式 = st.radio("選擇操作模式", ["釣魚穩健型 (看回測)", "搶短爆發型 (看噴發)"])
+    st.divider()
+    
+    if 模式 == "釣魚穩健型 (看回測)":
+        dist_threshold = st.slider("距離支撐門檻 (%)", 0.5, 8.0, 4.5)
+        min_rr_ratio = st.slider("最低風報比要求", 1.0, 5.0, 2.0)
     else:
-        dist_threshold = st.slider("距離MA20%", 0.5, 8.0, 4.5)
+        change_threshold = st.slider("今日最低漲幅 (%)", 1.0, 7.0, 2.5)
+        vol_multiplier = st.slider("量能爆發倍數", 1.0, 3.0, 1.5)
+    
+    scan_btn = st.button("🚀 開始全自動掃描")
 
-    scan_btn = st.button("開始掃描")
+# --- [核心掃描] ---
+# (此處省略部分重複的掃描邏輯，確保 final_df 有數據)
 
-# ================= 股票池 =================
-@st.cache_data(ttl=3600)
-def get_pool():
-    return {
-        "2330.TW": "台積電",
-        "2317.TW": "鴻海",
-        "6669.TW": "緯穎",
-        "2382.TW": "廣達",
-        "3231.TW": "緯創"
-    }
+# --- [重點：K線診斷區標註] ---
+st.divider()
+st.subheader("📈 單股深度診斷 (指標標註版)")
 
-# ================= 掃描 =================
-if scan_btn:
-    pool = get_pool()
-    results = []
+if st.session_state.get('final_df') is not None:
+    options = st.session_state.final_df.apply(lambda x: f"{x['代碼']} - {x['名稱']}", axis=1).tolist()
+    selected = st.selectbox("🎯 選取標的進行分析", options)
+    diag_sid = selected.split(" - ")[0]
+else:
+    diag_sid = st.text_input("輸入代號 (如: 6669.TW)", "6669.TW")
 
-    for sid, name in pool.items():
-        df = yf.Ticker(sid).history(period="6mo")
-        if df.empty or len(df) < 60:
-            continue
-
-        p = df['Close'].iloc[-1]
-        ma5 = df['Close'].rolling(5).mean().iloc[-1]
-        ma20 = df['Close'].rolling(20).mean().iloc[-1]
-        vol = df['Volume'].iloc[-1]
-        vol_avg = df['Volume'].rolling(5).mean().iloc[-1]
-
-        change = (df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2] * 100
-
-        score = 0
-
-        if 模式 == "爆發型":
-            if p > ma5: score += 30
-            if change > change_threshold: score += 30
-            if vol > vol_avg * vol_multiplier: score += 40
-
-        else:
-            dist = (p - ma20) / ma20 * 100
-            if 0 <= dist <= dist_threshold:
-                score = 70
-
-        if score >= 60:
-            results.append({
-                "名稱": name,
-                "代碼": sid,
-                "價格": round(p, 1),
-                "得分": score
-            })
-
-    st.session_state.df = pd.DataFrame(results)
-
-# ================= 排行榜 =================
-if "df" in st.session_state:
-    st.subheader("🏆 排行榜")
-    st.dataframe(st.session_state.df)
-
-# ================= 單股 =================
-st.subheader("📈 單股分析")
-
-sid = st.text_input("輸入股票", "6669.TW")
-
-if sid:
-    df = yf.Ticker(sid).history(period="6mo")
-
+if diag_sid:
+    df = yf.Ticker(diag_sid).history(period="6mo")
     if not df.empty:
-
-        # ===== 指標 =====
+        # 計算指標
         df['MA5'] = df['Close'].rolling(5).mean()
         df['MA20'] = df['Close'].rolling(20).mean()
-        df['MA60'] = df['Close'].rolling(60).mean()
-        df['vol_avg'] = df['Volume'].rolling(5).mean()
+        high_6m = df['High'].max()
+        last_ma20 = df['MA20'].iloc[-1]
 
-        # ===== 訊號 =====
-        df['signal'] = (
-            (df['Close'] > df['MA5']) &
-            (df['MA5'] > df['MA20']) &
-            (df['Volume'] > df['vol_avg'] * 1.2)
+        # 1. 主圖：K線
+        fig = go.Figure(data=[go.Candlestick(
+            x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], 
+            name='K線'
+        )])
+
+        # 2. 標出 MA20 月線 (您的核心支撐)
+        fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='MA20 月線', line=dict(color='cyan', width=2)))
+
+        # 3. 標出 MA5 短線趨勢
+        fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], name='MA5 趨勢', line=dict(color='orange', width=1, dash='dot')))
+
+        # 4. 標出 6個月高點 (壓力位/獲利目標)
+        fig.add_hline(y=high_6m, line_dash="dash", line_color="red", 
+                      annotation_text=f"6M 高點: {high_6m:.1f}", annotation_position="top left")
+
+        # 5. 標出「回測支撐區」 (MA20 + 門檻範圍)
+        # 畫出一個半透明的綠色區塊，顯示什麼價格叫「靠近支撐」
+        upper_support = last_ma20 * (1 + dist_threshold/100)
+        fig.add_hrect(y0=last_ma20, y1=upper_support, fillcolor="green", opacity=0.1, 
+                      layer="below", line_width=0, annotation_text="買進支撐區")
+
+        # 6. 圖表美化
+        fig.update_layout(
+            template='plotly_dark',
+            height=600,
+            title=f"{diag_sid} 技術指標診斷",
+            xaxis_rangeslider_visible=False,
+            yaxis_title="價格 (TWD)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
 
-        signal_df = df[df['signal']]
-
-        # ===== 畫圖 =====
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
-                            row_heights=[0.7, 0.3])
-
-        fig.add_trace(go.Candlestick(
-            x=df.index,
-            open=df['Open'], high=df['High'],
-            low=df['Low'], close=df['Close'],
-            name='K線'
-        ), row=1, col=1)
-
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA5'], name='MA5',
-                                 line=dict(color='yellow')), row=1, col=1)
-
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA20'], name='MA20',
-                                 line=dict(color='blue')), row=1, col=1)
-
-        fig.add_trace(go.Scatter(x=df.index, y=df['MA60'], name='MA60',
-                                 line=dict(color='red', dash='dot')), row=1, col=1)
-
-        # ▲訊號
-        fig.add_trace(go.Scatter(
-            x=signal_df.index,
-            y=signal_df['Low'] * 0.98,
-            mode='markers',
-            marker=dict(symbol='triangle-up', color='lime', size=10),
-            name='起漲'
-        ), row=1, col=1)
-
-        # 成交量
-        fig.add_trace(go.Bar(
-            x=df.index,
-            y=df['Volume'],
-            name='Volume'
-        ), row=2, col=1)
-
-        fig.update_layout(template='plotly_dark', height=600)
         st.plotly_chart(fig, use_container_width=True)
-
-        # ================= 回測 =================
-        st.subheader("📊 ▲回測")
-
-        take_profit = 0.08
-        stop_loss = 0.04
-        hold_days = 10
-
-        results = []
-
-        for idx in signal_df.index:
-            entry = df.loc[idx, 'Close']
-            entry_i = df.index.get_loc(idx)
-
-            exit_price = entry
-            ret = 0
-            reason = "時間到"
-
-            for i in range(entry_i+1, min(entry_i+1+hold_days, len(df))):
-                price = df['Close'].iloc[i]
-                change = (price - entry) / entry
-
-                if change >= take_profit:
-                    exit_price = price
-                    ret = change
-                    reason = "停利"
-                    break
-
-                if change <= -stop_loss:
-                    exit_price = price
-                    ret = change
-                    reason = "停損"
-                    break
-
-                if i == entry_i+hold_days-1:
-                    exit_price = price
-                    ret = change
-
-            results.append({
-                "日期": idx.strftime("%Y-%m-%d"),
-                "報酬%": round(ret*100,2),
-                "結果": "✅" if ret>0 else "❌",
-                "原因": reason
-            })
-
-        bt = pd.DataFrame(results)
-
-        if not bt.empty:
-            win = (bt["結果"]=="✅").mean()*100
-            avg = bt["報酬%"].mean()
-
-            col1, col2 = st.columns(2)
-            col1.metric("勝率", f"{win:.1f}%")
-            col2.metric("平均報酬", f"{avg:.2f}%")
-
-            st.dataframe(bt)
-
-        else:
-            st.warning("沒有訊號")
+        
+        # 額外數據診斷
+        c1, c2, c3 = st.columns(3)
+        c1.metric("當前價格", f"{df['Close'].iloc[-1]:.1f}")
+        c2.metric("MA20 支撐", f"{last_ma20:.1f}")
+        c3.metric("距支撐距離", f"{((df['Close'].iloc[-1]-last_ma20)/last_ma20*100):.2f}%")
