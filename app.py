@@ -1,49 +1,45 @@
-# [完整體備份 - 建議存檔]
-# 包含：評分制、風報比、MA20/6M壓力標註、緯穎補強、Token 登入保護
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 from FinMind.data import DataLoader
-import plotly.graph_objects as go
+import time
 
-# ----------------- 核心設定 -----------------
-FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoibGlvOTE5IiwiZW1haWwiOiJsaW85MTlAZ21haWwuY29tIn0.BUuQUOm9I528zgPhVvQOfOYDqS2fd5YudA6PKa1vHgA"
+st.set_page_config(page_title="股王釣魚 V8 AI App", layout="wide")
+st.title("🎣 股王釣魚 V8：AI 選股 App")
 
-def initialize_app():
-    st.set_page_config(page_title="韭菜選股 V1 - 完全體", layout="wide")
-    if 'final_df' not in st.session_state: st.session_state.final_df = None
+# 側邊欄控制項
+mode = st.sidebar.selectbox("選股模式", ["釣魚穩健型", "搶短爆發型"])
+threshold = st.sidebar.slider("最低門檻", 0, 100, 60)
+scan_num = st.sidebar.slider("掃描數量", 20, 200, 50)
 
-# ----------------- 資料與選股引擎 -----------------
-@st.cache_data(ttl=3600)
-def get_processed_pool(target_group):
+if st.sidebar.button("啟動全自動掃描"):
     dl = DataLoader()
-    try:
-        if FINMIND_TOKEN: dl.login(token=FINMIND_TOKEN)
-        df_info = dl.taiwan_stock_info()
-        keywords = '電子|半導體|電腦|通信|光電'
-        elec_df = df_info[df_info['industry_category'].str.contains(keywords, na=False)]
-        res = {f"{r['stock_id']}{'.TW' if r['type']=='twse' else '.TWO'}": r['stock_name'] for _, r in elec_df.head(100).iterrows()}
-        res["6669.TW"] = "緯穎"
-        return res
-    except: return {"6669.TW": "緯穎", "2330.TW": "台積電"}
-
-# ----------------- UI 介面 -----------------
-initialize_app()
-with st.sidebar:
-    st.header("🔍 選股核心設定")
-    模式 = st.radio("選擇操作模式", ["釣魚穩健型 (看回測)", "搶短爆發型 (看噴發)"])
-    st.divider()
-    if 模式 == "釣魚穩健型 (看回測)":
-        dist_threshold = st.slider("距離支撐門檻 (%)", 0.5, 8.0, 4.5)
-        min_rr_ratio = st.slider("最低風報比要求", 1.0, 5.0, 2.0)
-    else:
-        change_threshold = st.slider("今日最低漲幅 (%)", 1.0, 7.0, 2.5)
-        vol_multiplier = st.slider("量能爆發倍數", 1.0, 3.0, 1.5)
+    df_info = dl.taiwan_stock_info()
+    elec_df = df_info[df_info['industry_category'].str.contains('電子|半導體|光電', na=False)]
+    name_map = dict(zip(elec_df['stock_id'], elec_df['stock_name']))
+    raw_list = elec_df['stock_id'].head(scan_num).tolist()
     
-    target_pool = st.selectbox("3. 選擇魚池", ["AI 伺服器/代工", "全部電子股"])
-    if st.button("🚀 開始全自動掃描"):
-        # [執行選股評分邏輯...] (此處代碼略，執行後存入 st.session_state.final_df)
-        pass
+    all_results = []
+    progress_bar = st.progress(0)
+    
+    for i, code in enumerate(raw_list):
+        symbol = f"{code}.TW"
+        try:
+            df = yf.Ticker(symbol).history(period="3mo")
+            if df.empty:
+                df = yf.Ticker(f"{code}.TWO").history(period="3mo")
+            if not df.empty and len(df) > 20:
+                p = df['Close'].iloc[-1]
+                m5 = df['Close'].rolling(5).mean().iloc[-1]
+                m20 = df['Close'].rolling(20).mean().iloc[-1]
+                change = (p - df['Close'].iloc[-2]) / df['Close'].iloc[-2] * 100
+                score = 100 if p > m5 and change > 2 else 50
+                if score >= threshold:
+                    all_results.append({"代碼": symbol, "名稱": name_map.get(code, "未知"), "價格": round(p, 2), "得分": score})
+        except: continue
+        progress_bar.progress((i + 1) / scan_num)
 
-# ----------------- K線標註診斷 (確保不掉件) -----------------
-# ... (這裡會保留上一版所有的 fig.add_hrect 和 fig.add_hline)
+    if all_results:
+        st.table(pd.DataFrame(all_results))
+    else:
+        st.warning("目前無符合條件標的")
