@@ -2,10 +2,11 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 from FinMind.data import DataLoader
+import plotly.graph_objects as go
 import time
 
 st.set_page_config(page_title="韭菜選股 V1", layout="wide")
-st.title("🧬 韭菜選股 V1 (含 AI 盤後分析助手)")
+st.title("🧬 韭菜選股 V1)
 
 # --- 側邊欄控制區 ---
 st.sidebar.header("🔍 選股核心設定")
@@ -23,7 +24,6 @@ else:
 target_group = st.sidebar.selectbox("3. 選擇魚池", 
     ["全部電子股 (Top 200)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
 
-# 初始化 Session State 存放結果
 if 'final_df' not in st.session_state:
     st.session_state.final_df = None
 
@@ -74,29 +74,38 @@ if st.sidebar.button("🚀 開始全自動掃描"):
             time.sleep(0.05)
         except: continue
         progress_bar.progress((i + 1) / len(target_dict))
-
     st.session_state.final_df = pd.DataFrame(all_results) if all_results else None
 
-# --- 顯示結果與 AI 助手 ---
+# --- 顯示結果與分析助手 ---
 if st.session_state.final_df is not None:
     st.subheader(f"🏆 {模式} 排行榜")
     st.dataframe(st.session_state.final_df, use_container_width=True)
-    
-    st.divider()
-    st.subheader("🤖 AI 盤後分析助手")
-    if st.button("生成 Claude 3 分析指令"):
+    if st.button("🤖 生成 AI 盤後分析指令"):
         top_data = st.session_state.final_df.head(3).to_string(index=False)
-        ai_prompt = f"""
-請扮演專業台股分析師，針對「韭菜選股 V1」掃描出的【{模式}】數據進行解析：
-數據如下：
-{top_data}
+        st.code(f"請分析以下數據並給予建議：\n{top_data}", language="text")
 
-請根據模式特性提供：
-1. {"針對回測支撐標的，分析其是否具備『止跌起漲』的特徵？" if "釣魚" in 模式 else "針對強勢噴發標的，分析其『隔天續航力』與追高風險？"}
-2. 設定明天的「壓力位」與「支撐位」。
-3. 具體的進場、停損與停利建議。
-"""
-        st.code(ai_prompt, language="text")
-        st.info("☝️ 複製上方指令貼給 Claude 3 或 ChatGPT 即可！")
-elif st.session_state.final_df is None:
-    st.write("目前無符合條件之標的，請嘗試調整左側參數。")
+# --- 🚀 下方新增：單股深度診斷 K 線圖區 ---
+st.divider()
+st.subheader("📈 單股深度診斷 (K 線儀表板)")
+diag_symbol = st.text_input("輸入要診斷的股票代號 (例如: 2330.TW 或 3081.TWO)", "2330.TW")
+
+if diag_symbol:
+    df_diag = yf.Ticker(diag_symbol).history(period="6mo")
+    if not df_diag.empty:
+        df_diag['MA5'] = df_diag['Close'].rolling(5).mean()
+        df_diag['MA20'] = df_diag['Close'].rolling(20).mean()
+        df_diag['MA60'] = df_diag['Close'].rolling(60).mean()
+        
+        # 買進訊號 (由下往上穿過 MA5)
+        buy_signal = (df_diag['Close'] > df_diag['MA5']) & (df_diag['Close'].shift(1) < df_diag['MA5'].shift(1))
+        
+        fig = go.Figure(data=[go.Candlestick(x=df_diag.index, open=df_diag['Open'], high=df_diag['High'], low=df_diag['Low'], close=df_diag['Close'], name='K線')])
+        fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA5'], line=dict(color='orange', width=1), name='MA5'))
+        fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA20'], line=dict(color='blue', width=1), name='MA20'))
+        fig.add_trace(go.Scatter(x=df_diag.index, y=df_diag['MA60'], line=dict(color='red', width=1.5, dash='dot'), name='MA60 (季線)'))
+        fig.add_trace(go.Scatter(x=df_diag[buy_signal].index, y=df_diag[buy_signal]['Low'] * 0.98, mode='markers', marker=dict(symbol='triangle-up', size=12, color='lime'), name='起漲訊號'))
+        
+        fig.update_layout(template='plotly_dark', height=500, margin=dict(l=20, r=20, t=20, b=20))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.error("找不到該代號數據，請確認格式是否正確。")
