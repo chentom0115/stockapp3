@@ -22,7 +22,7 @@ else:
     vol_multiplier = st.sidebar.slider("量能爆發倍數", 1.0, 3.0, 1.5)
 
 target_group = st.sidebar.selectbox("3. 選擇魚池", 
-    ["全部電子股 (Top 300)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
+    ["全部電子股 (Top 100)", "AI 伺服器/代工", "CPO 矽光子", "低軌衛星概念", "載板三雄"])
 
 # 初始化 Session State
 if 'final_df' not in st.session_state:
@@ -37,7 +37,7 @@ if st.sidebar.button("🚀 開始全自動掃描"):
         "載板三雄": {"3037.TW": "欣興", "8046.TW": "南電", "3189.TW": "景碩", "2368.TW": "金像電"}
     }
     all_results = []
-    if target_group == "全部電子股 (Top 300)":
+    if target_group == "全部電子股 (Top 100)":
         dl = DataLoader()
         df_info = dl.taiwan_stock_info()
         elec_df = df_info[df_info['industry_category'].str.contains('電子|半導體|光電', na=False)]
