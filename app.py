@@ -4,6 +4,99 @@ import pandas as pd
 from FinMind.data import DataLoader
 import plotly.graph_objects as go
 import time
+
+# 設定 Token
+FINMIND_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyX2lkIjoibGlvOTE5IiwiZW1haWwiOiJsaW85MTlAZ21haWwuY29tIn0.BUuQUOm9I528zgPhVvQOfOYDqS2fd5YudA6PKa1vHgA"
+
+st.set_page_config(page_title="韭菜選股 V1", layout="wide")
+st.title("🚀 韭菜選股 V1")
+
+# --- 側邊欄控制區 (比照截圖佈局) ---
+with st.sidebar:
+    st.header("🔍 選股核心設定")
+    模式 = st.radio("選擇操作模式", ["釣魚穩健型 (看回測)", "搶短爆發型 (看噴發)"])
+    st.divider()
+    
+    if 模式 == "釣魚穩健型 (看回測)":
+        dist_threshold = st.slider("距離支撐門檻 (%)", 0.5, 8.0, 4.5)
+        min_rr_ratio = st.slider("最低風報比要求", 1.0, 5.0, 2.0)
+    else:
+        change_threshold = st.slider("今日最低漲幅 (%)", 1.0, 7.0, 2.5)
+        vol_multiplier = st.slider("量能爆發倍數", 1.0, 3.0, 1.5)
+    
+    target_group = st.selectbox("3. 選擇魚池", ["AI 伺服器/代工", "全部電子股 (Top 100)", "CPO 矽光子"])
+    scan_btn = st.button("🚀 開始全自動掃描")
+
+# --- 資料獲取函數 ---
+@st.cache_data(ttl=3600)
+def get_stock_list(group):
+    # 這裡實作您筆記本中的產業過濾邏輯
+    dl = DataLoader()
+    try:
+        df_info = dl.taiwan_stock_info()
+        if group == "AI 伺服器/代工":
+            codes = ["2330", "2317", "2382", "3231", "6669", "3017", "2376"]
+            return {f"{c}.TW": df_info[df_info['stock_id']==c]['stock_name'].values[0] for c in codes}
+        # 其他魚池邏輯...
+        return {"6669.TW": "緯穎", "2330.TW": "台積電"}
+    except:
+        return {"6669.TW": "緯穎", "2330.TW": "台積電"}
+
+# --- 1. 執行掃描與排行榜 ---
+if scan_btn:
+    stocks = get_stock_list(target_group)
+    all_results = []
+    progress = st.progress(0)
+    
+    for i, (symbol, name) in enumerate(stocks.items()):
+        try:
+            df = yf.Ticker(symbol).history(period="6mo")
+            if df.empty: continue
+            
+            # 計算回測支撐與風報比邏輯
+            p = df['Close'].iloc[-1]
+            m20 = df['Close'].rolling(20).mean().iloc[-1]
+            high_6m = df['High'].max()
+            
+            if 模式 == "釣魚穩健型 (看回測)":
+                dist = (p - m20) / m20 * 100
+                if 0 <= dist <= dist_threshold:
+                    reward = high_6m - p
+                    risk = p - (m20 * 0.98)
+                    rr = round(reward / risk, 2) if risk > 0 else 0
+                    if rr >= min_rr_ratio:
+                        all_results.append({"名稱": name, "代碼": symbol, "價格": round(p, 1), "風報比": rr, "診斷": "💎 回測支撐"})
+            # 搶短爆發型邏輯...
+        except: continue
+        progress.progress((i + 1) / len(stocks))
+    
+    st.session_state.rs_df = pd.DataFrame(all_results)
+
+# 顯示排行榜
+if 'rs_df' in st.session_state and st.session_state.rs_df is not None:
+    st.subheader(f"🏆 {模式} 排行榜")
+    st.dataframe(st.session_state.rs_df, use_container_width=True)
+
+# --- 2. 單股深度診斷 (比照截圖佈局) ---
+st.divider()
+st.subheader("📈 單股深度診斷 (自動連動排行榜)")
+if 'rs_df' in st.session_state and not st.session_state.rs_df.empty:
+    selected = st.selectbox("🎯 請從排行榜中選取要診斷的股票", 
+                          st.session_state.rs_df.apply(lambda x: f"{x['代碼']} - {x['名稱']}", axis=1))
+    diag_sid = selected.split(" - ")[0]
+    
+    df_diag = yf.Ticker(diag_sid).history(period="6mo")
+    fig = go.Figure(data=[go.Candlestick(x=df_diag.index, open=df_diag['Open'], 
+                                       high=df_diag['High'], low=df_diag['Low'], close=df_diag['Close'])])
+    fig.update_layout(template='plotly_dark', height=400, margin=dict(l=20, r=20, t=20, b=20))
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("💡 請先點擊左側「開始全自動掃描」產生排行榜。")import streamlit as st
+import yfinance as yf
+import pandas as pd
+from FinMind.data import DataLoader
+import plotly.graph_objects as go
+import time
 from datetime import datetime, timedelta
 
 # 請在此處貼上您的永久 Token
